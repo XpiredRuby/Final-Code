@@ -1,14 +1,16 @@
 import math
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
-from simple_flight import Config, Mission, State, decode_px4_mode
+from Position_Controller.VehicleState import VehicleState, decode_px4_mode
+from Position_Controller.trajectory import Config, Mission
 
 
 class SimpleFlightTests(unittest.TestCase):
     def setUp(self):
         self.config = Config()
-        self.state = State(z=0.0, yaw=0.2, landed=1)
+        self.state = VehicleState(z=0.0, yaw=0.2, landed=1)
 
     def test_confirmed_values(self):
         self.assertEqual(self.config.hz, 10.0)
@@ -27,7 +29,7 @@ class SimpleFlightTests(unittest.TestCase):
     def test_trajectory_is_exactly_200_m_and_never_exceeds_5_m_s(self):
         mission = Mission(self.config, self.state, heading_deg=0.0)
         mission.phase = "TRAJECTORY"
-        state = State(z=-8.0, landed=2)
+        state = VehicleState(z=-8.0, landed=2)
         previous_speed = 0.0
         for _ in range(3000):
             command = mission.step(state)
@@ -51,27 +53,32 @@ class SimpleFlightTests(unittest.TestCase):
     def test_descent_slows_at_five_metres_agl(self):
         mission = Mission(self.config, self.state, heading_deg=0.0)
         mission.phase = "LAND_FAST"
-        self.assertEqual(mission.step(State(x=200.0, z=-5.01, landed=2)).vz, 0.5)
-        self.assertEqual(mission.step(State(x=200.0, z=-5.0, landed=2)).vz, 0.1)
+        self.assertEqual(mission.step(VehicleState(x=200.0, z=-5.01, landed=2)).vz, 0.5)
+        self.assertEqual(mission.step(VehicleState(x=200.0, z=-5.0, landed=2)).vz, 0.1)
         self.assertEqual(mission.phase, "LAND_SLOW")
 
     def test_touchdown_hands_control_to_px4_land(self):
         mission = Mission(self.config, self.state, heading_deg=0.0)
         mission.phase = "LAND_SLOW"
-        command = mission.step(State(x=200.0, z=-0.15, landed=2))
+        command = mission.step(VehicleState(x=200.0, z=-0.15, landed=2))
         self.assertEqual(mission.phase, "LAND_HANDOFF")
         self.assertEqual(command.vz, 0.0)
 
     def test_landing_uses_known_initial_surface_height(self):
-        initial = State(x=10.0, y=20.0, z=3.0, yaw=math.pi / 2, landed=1)
+        initial = VehicleState(x=10.0, y=20.0, z=3.0, yaw=math.pi / 2, landed=1)
         mission = Mission(self.config, initial, heading_deg=0.0)
-        self.assertEqual(mission.agl(State(z=-2.0)), 5.0)
+        self.assertEqual(mission.agl(VehicleState(z=-2.0)), 5.0)
 
     def test_px4_mode_decoder_handles_current_heartbeat_flags(self):
         offboard = SimpleNamespace(custom_mode=6 << 16)
         land = SimpleNamespace(custom_mode=(6 << 24) | (4 << 16))
         self.assertEqual(decode_px4_mode(offboard), "OFFBOARD")
         self.assertEqual(decode_px4_mode(land), "LAND")
+
+    def test_active_controller_stays_under_500_lines(self):
+        files = Path("Position_Controller").glob("*.py")
+        lines = sum(len(path.read_text().splitlines()) for path in files)
+        self.assertLessEqual(lines, 500)
 
 
 if __name__ == "__main__":
